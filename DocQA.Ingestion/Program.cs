@@ -1,5 +1,4 @@
-﻿using System.Net.Mime;
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using Azure;
 using Azure.Search.Documents;
@@ -10,36 +9,36 @@ using DocQA.Ingestion;
 using Microsoft.Extensions.Configuration;
 using Microsoft.SemanticKernel;
 using Microsoft.Extensions.AI;
-using Microsoft.SemanticKernel.ChatCompletion;
 
-bool skipIngestion = args.Contains("--query-only");
-bool runEval = args.Contains("--eval");
-bool resetIndex = args.Contains("--reset");
+var skipIngestion = args.Contains("--query-only");
+var runEval = args.Contains("--eval");
+var resetIndex = args.Contains("--reset");
+
 var config = new ConfigurationBuilder().AddUserSecrets(System.Reflection.Assembly.GetEntryAssembly()!).Build();
-var aoaiEndpoint = config["AzureOpenAI:Endpoint"]!;
-var aoaiKey      = config["AzureOpenAI:ApiKey"]!;
+var azureOpenAiEndpoint = config["AzureOpenAI:Endpoint"]!;
+var azureOpenAiKey      = config["AzureOpenAI:ApiKey"]!;
 var searchEndpoint = config["AzureSearch:Endpoint"]!;
 var searchKey      = config["AzureSearch:ApiKey"]!;
 
-const string IndexName = "docs";
-const int EmbeddingDimensions = 1536; // text-embedding-3-small
+const string indexName = "docs";
+const int embeddingDimensions = 1536; // text-embedding-3-small
 
-// --- 1. Build the embedding service via Semantic Kernel ---
+// --- Build the embedding + chat services via Semantic Kernel ---
 #pragma warning disable SKEXP0010
 var kernel = Kernel.CreateBuilder()
-    .AddAzureOpenAIEmbeddingGenerator("embeddings", aoaiEndpoint, aoaiKey)
-    .AddAzureOpenAIChatClient("chat", aoaiEndpoint, aoaiKey)
+    .AddAzureOpenAIEmbeddingGenerator("embeddings", azureOpenAiEndpoint, azureOpenAiKey)
+    .AddAzureOpenAIChatClient("chat", azureOpenAiEndpoint, azureOpenAiKey)
     .Build();
+#pragma warning restore SKEXP0010
+
 var embedder = kernel.GetRequiredService<IEmbeddingGenerator<string, Embedding<float>>>();
 var chat = kernel.GetRequiredService<IChatClient>();
 var indexClient = new SearchIndexClient(new Uri(searchEndpoint), new AzureKeyCredential(searchKey));
-
-#pragma warning restore SKEXP0010
-var searchClient = new SearchClient(new Uri(searchEndpoint), IndexName, new AzureKeyCredential(searchKey));
+var searchClient = new SearchClient(new Uri(searchEndpoint), indexName, new AzureKeyCredential(searchKey));
 
 if (resetIndex)
 {
-    await indexClient.DeleteIndexAsync(IndexName, CancellationToken.None);
+    await indexClient.DeleteIndexAsync(indexName, CancellationToken.None);
     Console.WriteLine("Index deleted.");
 }
 
@@ -47,9 +46,8 @@ if (runEval) { await RunEvals(); return; }
 
 if (!skipIngestion)
 {
-// --- 2. Create (or update) the search index with a vector field ---
-
-    var index = new SearchIndex(IndexName)
+    // --- Create (or update) the search index with a vector field ---
+    var index = new SearchIndex(indexName)
     {
         Fields =
         {
@@ -60,7 +58,7 @@ if (!skipIngestion)
             new SearchField("contentVector", SearchFieldDataType.Collection(SearchFieldDataType.Single))
             {
                 IsSearchable = true,
-                VectorSearchDimensions = EmbeddingDimensions,
+                VectorSearchDimensions = embeddingDimensions,
                 VectorSearchProfileName = "vprofile"
             }
         },
@@ -71,16 +69,16 @@ if (!skipIngestion)
         }
     };
     await indexClient.CreateOrUpdateIndexAsync(index);
-    Console.WriteLine($"Index '{IndexName}' ready.");
+    Console.WriteLine($"Index '{indexName}' ready.");
 
-// --- 3. Chunk every markdown file ---
+    // --- Chunk every markdown file ---
     var docsPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "docs");
     var allChunks = new List<DocumentChunk>();
     foreach (var file in Directory.EnumerateFiles(docsPath, "*.md", SearchOption.AllDirectories))
     {
         var text = await File.ReadAllTextAsync(file);
         if (string.IsNullOrWhiteSpace(text)) continue;
-        text = Chunker.MarkdownCleaner.Clean(text);          // <-- add this line
+        text = Chunker.MarkdownCleaner.Clean(text);
         if (string.IsNullOrWhiteSpace(text)) continue;
         var rel = Path.GetRelativePath(docsPath, file);
         allChunks.AddRange(Chunker.Chunk(rel, text));
@@ -88,10 +86,10 @@ if (!skipIngestion)
 
     Console.WriteLine($"Produced {allChunks.Count} chunks from markdown files.");
 
-// --- 4. Embed in batches and upload ---
+    // --- Embed in batches and upload ---
     const int batchSize = 50;
 
-    for (int i = 0; i < allChunks.Count; i += batchSize)
+    for (var i = 0; i < allChunks.Count; i += batchSize)
     {
         var batch = allChunks.Skip(i).Take(batchSize).ToList();
         var embeddings = await EmbedWithRetry(batch.Select(c => c.Content).ToList());
@@ -113,48 +111,18 @@ if (!skipIngestion)
     Console.WriteLine("Ingestion complete.");
 }
 
-string[] questions =
-{
-    "How do I add an AI service to the kernel?",
-    "What is a plugin in Semantic Kernel?",
-    "How does the kernel work?",
-    "What is the airspeed velocity of an unladen swallow?"  // deliberately unanswerable
-};
-
-foreach (var q in questions)
-{
-    Console.WriteLine($"\n=== Q: {q} ===");
-    Console.WriteLine(await Ask(q));
-}
-
-// // ---- retrieval smoke test ----
-// string question = "how does the kernel work?";
-// var qVec = (await embedder.GenerateAsync([question]))[0];
-//
-// var searchOptions = new SearchOptions { Size = 3 };
-// searchOptions.VectorSearch = new()
-// {
-//     Queries = { new VectorizedQuery(qVec.Vector.ToArray()) { KNearestNeighborsCount = 3, Fields = { "contentVector" } } }
-// };
-//
-// Console.WriteLine($"\nQ: {question}\n");
-// var response = await searchClient.SearchAsync<SearchDocument>(null, searchOptions);
-// await foreach (var r in response.Value.GetResultsAsync())
-// {
-//     Console.WriteLine($"[score {r.Score:F3}] {r.Document["sourceFile"]}");
-//     var snippet = r.Document["content"].ToString()!;
-//     Console.WriteLine(snippet[..Math.Min(200, snippet.Length)] + "...\n");
-// }
+return;
 
 async Task<GeneratedEmbeddings<Embedding<float>>> EmbedWithRetry(IList<string> inputs)
 {
-    int delayMs = 5000;
-    for (int attempt = 1; attempt <= 6; attempt++)
+    var delayMs = 5000;
+    for (var attempt = 1; attempt <= 6; attempt++)
     {
         try { return await embedder.GenerateAsync(inputs); }
+        // Crude 429 detection by message; could inspect a typed status code instead.
         catch (Exception ex) when (ex.Message.Contains("429") && attempt < 6)
         {
-            Console.WriteLine($"Rate limited, waiting {delayMs/1000}s (attempt {attempt})...");
+            Console.WriteLine($"Rate limited, waiting {delayMs / 1000}s (attempt {attempt})...");
             await Task.Delay(delayMs);
             delayMs = Math.Min(delayMs * 2, 60000); // cap at 60s — the rate window length
         }
@@ -168,16 +136,19 @@ async Task<string> Ask(string question)
     var qVec = (await embedder.GenerateAsync([question]))[0];
 
     // 2. Retrieve top-k relevant chunks
-    var opts = new SearchOptions { Size = 5 };
-    opts.VectorSearch = new()
+    var opts = new SearchOptions
     {
-        Queries = { new VectorizedQuery(qVec.Vector.ToArray()) { KNearestNeighborsCount = 5, Fields = { "contentVector" } } }
+        Size = 5,
+        VectorSearch = new VectorSearchOptions
+        {
+            Queries = { new VectorizedQuery(qVec.Vector.ToArray()) { KNearestNeighborsCount = 5, Fields = { "contentVector" } } }
+        }
     };
     var hits = await searchClient.SearchAsync<SearchDocument>(null, opts);
 
     // 3. Assemble the context block from retrieved chunks
     var sb = new StringBuilder();
-    int n = 1;
+    var n = 1;
     await foreach (var hit in hits.Value.GetResultsAsync())
     {
         sb.AppendLine($"[Source {n}: {hit.Document["sourceFile"]}]");
@@ -187,7 +158,7 @@ async Task<string> Ask(string question)
     }
     var context = sb.ToString();
 
-    // 4. Build the grounded prompt
+    // 4. Build the grounded prompt — answer only from sources, else refuse, with citations
     var systemPrompt =
         "You are a helpful assistant answering questions about Microsoft Semantic Kernel. " +
         "Answer ONLY using the provided sources below. " +
@@ -195,14 +166,12 @@ async Task<string> Ask(string question)
         "Cite the source number(s) you used in brackets, like [Source 1].\n\n" +
         "SOURCES:\n" + context;
 
-    var history = new ChatHistory();
-    history.AddSystemMessage(systemPrompt);
-    history.AddUserMessage(question);
-
     // 5. Call the model
     var reply = await chat.GetResponseAsync(
-        new[] { new ChatMessage(ChatRole.System, systemPrompt),
-            new ChatMessage(ChatRole.User, question) });
+    [
+        new ChatMessage(ChatRole.System, systemPrompt),
+        new ChatMessage(ChatRole.User, question)
+    ]);
     return reply.Text ?? "(no response)";
 }
 
@@ -221,9 +190,9 @@ async Task RunEvals()
         var answer = await Ask(c.Question);
 
         // Deterministic checks
-        bool refused = answer.Contains("I don't know", StringComparison.OrdinalIgnoreCase);
-        bool refusalCorrect = refused == c.ShouldRefuse;
-        int factsHit = c.ExpectedFacts.Count(f =>
+        var refused = answer.Contains("I don't know", StringComparison.OrdinalIgnoreCase);
+        var refusalCorrect = refused == c.ShouldRefuse;
+        var factsHit = c.ExpectedFacts.Count(f =>
             answer.Contains(f, StringComparison.OrdinalIgnoreCase));
 
         // LLM-as-judge
@@ -251,10 +220,7 @@ async Task<(int score, string reasoning)> Judge(EvalCase c, string answer)
               "1 = wrong or irrelevant.\n") +
         "Respond with ONLY a JSON object: {\"score\": <1-5>, \"reasoning\": \"<one sentence>\"}";
 
-    var history = new ChatHistory();
-    history.AddUserMessage(judgePrompt);
-    var messages = new[] { new ChatMessage(ChatRole.User, judgePrompt) };
-    var reply = await chat.GetResponseAsync(messages);
+    var reply = await chat.GetResponseAsync([new ChatMessage(ChatRole.User, judgePrompt)]);
     var raw = (reply.Text ?? "").Replace("```json", "").Replace("```", "").Trim();
 
     try
@@ -277,8 +243,8 @@ void PrintReport(List<EvalResult> results)
         Console.WriteLine($"   judge: {r.JudgeReasoning}\n");
     }
 
-    double avgJudge = results.Average(r => r.JudgeScore);
-    double refusalAcc = results.Count(r => r.RefusalCorrect) / (double)results.Count;
+    var avgJudge = results.Average(r => r.JudgeScore);
+    var refusalAcc = results.Count(r => r.RefusalCorrect) / (double)results.Count;
     Console.WriteLine("---------------------------------------------");
     Console.WriteLine($"Avg judge score:   {avgJudge:F2}/5");
     Console.WriteLine($"Refusal accuracy:  {refusalAcc:P0}");
