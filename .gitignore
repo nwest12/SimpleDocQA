@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+
+# JetBrains Rider
+.idea/
+
+# .NET build output
+bin/
+obj/
+
+# Markdown docs (keep README.md)
+*.md
+!README.md

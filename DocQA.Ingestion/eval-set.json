@@ -1,0 +1,72 @@
+[
+  {
+    "id": "q1",
+    "question": "What is a plugin in Semantic Kernel?",
+    "category": "answerable",
+    "expectedFacts": ["function", "kernel"],
+    "shouldRefuse": false
+  },
+  {
+    "id": "q2",
+    "question": "How does the kernel process a prompt?",
+    "category": "answerable",
+    "expectedFacts": ["service", "prompt", "response"],
+    "shouldRefuse": false
+  },
+  {
+    "id": "q3",
+    "question": "What is the purpose of the kernel in Semantic Kernel?",
+    "category": "answerable",
+    "expectedFacts": ["service", "plugin"],
+    "shouldRefuse": false
+  },
+  {
+    "id": "q4",
+    "question": "How do I add an AI service to the kernel?",
+    "category": "answerable",
+    "expectedFacts": ["kernel", "service"],
+    "shouldRefuse": false
+  },
+  {
+    "id": "q5",
+    "question": "Which method adds an Azure OpenAI chat completion service to the kernel builder?",
+    "category": "specific",
+    "expectedFacts": ["AddAzureOpenAIChatCompletion"],
+    "shouldRefuse": false
+  },
+  {
+    "id": "q6",
+    "question": "How do you enable automatic function calling in Semantic Kernel?",
+    "category": "specific",
+    "expectedFacts": ["function", "auto"],
+    "shouldRefuse": false
+  },
+  {
+    "id": "q7",
+    "question": "What is the airspeed velocity of an unladen swallow?",
+    "category": "unanswerable",
+    "expectedFacts": [],
+    "shouldRefuse": true
+  },
+  {
+    "id": "q8",
+    "question": "How much does Azure OpenAI cost per month?",
+    "category": "unanswerable",
+    "expectedFacts": [],
+    "shouldRefuse": true
+  },
+  {
+    "id": "q9",
+    "question": "What is the difference between a plugin and a function in Semantic Kernel?",
+    "category": "multipart",
+    "expectedFacts": ["plugin", "function"],
+    "shouldRefuse": false
+  },
+  {
+    "id": "q10",
+    "question": "How do plugins and AI services work together in the kernel?",
+    "category": "multipart",
+    "expectedFacts": ["plugin", "service"],
+    "shouldRefuse": false
+  }
+]
