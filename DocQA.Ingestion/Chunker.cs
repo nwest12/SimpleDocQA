@@ -7,10 +7,15 @@ public record DocumentChunk(string Id, string SourceFile, int ChunkIndex, string
 
 public static partial class Chunker
 {
-    private const int TargetChars = 2000;   // ~500 tokens
-    private const int OverlapChars = 200;    // ~50 tokens
+    // Defaults. Pass explicit values to experiment with different sizes.
+    public const int DefaultTargetChars  = 2000;   // ~500 tokens
+    public const int DefaultOverlapChars = 200;     // ~50 tokens
 
-    public static IEnumerable<DocumentChunk> Chunk(string sourceFile, string text)
+    public static IEnumerable<DocumentChunk> Chunk(
+        string sourceFile,
+        string text,
+        int targetChars  = DefaultTargetChars,
+        int overlapChars = DefaultOverlapChars)
     {
         var paragraphs = text.Split("\n\n", StringSplitOptions.RemoveEmptyEntries);
         var current = new StringBuilder();
@@ -18,12 +23,12 @@ public static partial class Chunker
 
         foreach (var para in paragraphs)
         {
-            if (current.Length + para.Length > TargetChars && current.Length > 0)
+            if (current.Length + para.Length > targetChars && current.Length > 0)
             {
                 yield return Make(sourceFile, index++, current.ToString());
                 var tail = current.ToString();
                 current.Clear();
-                current.Append(tail[^Math.Min(OverlapChars, tail.Length)..]);
+                current.Append(tail[^Math.Min(overlapChars, tail.Length)..]);
             }
             current.Append(para).Append("\n\n");
         }

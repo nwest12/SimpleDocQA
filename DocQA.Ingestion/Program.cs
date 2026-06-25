@@ -11,8 +11,15 @@ using Microsoft.SemanticKernel;
 using Microsoft.Extensions.AI;
 
 var skipIngestion = args.Contains("--query-only");
-var runEval = args.Contains("--eval");
-var resetIndex = args.Contains("--reset");
+var runEval       = args.Contains("--eval");
+var resetIndex    = args.Contains("--reset");
+
+// --chunk-size <chars>  and  --overlap <chars>  for experimentation
+int chunkSize  = GetIntArg(args, "--chunk-size",  Chunker.DefaultTargetChars);
+int chunkOverlap = GetIntArg(args, "--overlap",   Chunker.DefaultOverlapChars);
+
+if (chunkSize != Chunker.DefaultTargetChars || chunkOverlap != Chunker.DefaultOverlapChars)
+    Console.WriteLine($"[experiment] chunk-size={chunkSize}  overlap={chunkOverlap}");
 
 var config = new ConfigurationBuilder().AddUserSecrets(System.Reflection.Assembly.GetEntryAssembly()!).Build();
 var azureOpenAiEndpoint = config["AzureOpenAI:Endpoint"]!;
@@ -81,7 +88,7 @@ if (!skipIngestion)
         text = Chunker.MarkdownCleaner.Clean(text);
         if (string.IsNullOrWhiteSpace(text)) continue;
         var rel = Path.GetRelativePath(docsPath, file);
-        allChunks.AddRange(Chunker.Chunk(rel, text));
+        allChunks.AddRange(Chunker.Chunk(rel, text, chunkSize, chunkOverlap));
     }
 
     Console.WriteLine($"Produced {allChunks.Count} chunks from markdown files.");
@@ -112,6 +119,12 @@ if (!skipIngestion)
 }
 
 return;
+
+int GetIntArg(string[] a, string flag, int fallback)
+{
+    var idx = Array.IndexOf(a, flag);
+    return idx >= 0 && idx + 1 < a.Length && int.TryParse(a[idx + 1], out var v) ? v : fallback;
+}
 
 async Task<GeneratedEmbeddings<Embedding<float>>> EmbedWithRetry(IList<string> inputs)
 {
