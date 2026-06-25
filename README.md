@@ -26,6 +26,10 @@ DocQA.Ingestion  (C#/.NET 8)
 DocQA.QueryService  (Python/FastAPI)
   └── Query-only API: exposes /health, /query, /ask over the same index
 
+DocQA.Agent  (Python/LangGraph)
+  └── Agentic CLI: takes a SK code snippet, queries docs via tool calls,
+      returns grounded migration advice
+
 Shared infrastructure
   ├── Azure AI Search  (vector store)
   └── Azure OpenAI  (text-embedding-3-small + gpt-4o-mini)
@@ -35,19 +39,24 @@ Shared infrastructure
 |---|---|
 | Ingestion + eval | C#/.NET 8, Semantic Kernel |
 | Query API | Python 3.12, FastAPI, uv |
+| Agent | Python 3.12, LangGraph, uv |
 | LLM | Azure OpenAI `gpt-4o-mini` |
 | Embeddings | Azure OpenAI `text-embedding-3-small` (1536-dim) |
 | Vector store | Azure AI Search |
 
-## Why two stacks
+## Why three components
 
-The RAG pattern is language-agnostic. Building both components demonstrates
+The RAG pattern is language-agnostic. Building across two languages demonstrates
 that, and reflects a realistic scenario: a team might own ingestion and
-infrastructure in C#/.NET while exposing the search capability as a Python
-microservice for the broader AI ecosystem (LangChain, agents, notebooks, etc.).
+infrastructure in C#/.NET while exposing search as a Python microservice for the
+broader AI ecosystem.
 
-The .NET component leverages existing backend depth. The Python component is
-deliberate skill-building in the Python AI engineering space.
+`DocQA.Agent` takes it a step further — it uses `DocQA.QueryService` as a tool
+inside a LangGraph ReAct agent loop. The agent decides what questions to ask,
+calls the service repeatedly until it has enough information, then synthesizes
+migration advice. This demonstrates the jump from single-shot RAG to agentic
+orchestration: tool definition, the reasoning loop, and grounding an agent's
+output in a retrieval system.
 
 ## Getting the docs corpus
 
@@ -188,6 +197,45 @@ max 20):
 curl -X POST http://localhost:8000/ask \
   -H "Content-Type: application/json" \
   -d '{"question": "What is the Kernel?", "top_k": 3}'
+```
+
+---
+
+## DocQA.Agent (Python/LangGraph)
+
+A CLI agent that takes a Semantic Kernel code snippet, queries
+`DocQA.QueryService` as a tool, and returns grounded migration advice.
+Requires the QueryService to be running.
+
+### Setup
+
+```bash
+cd DocQA.Agent
+
+cp .env.example .env
+# Fill in the same Azure OpenAI values used by DocQA.QueryService.
+# QUERY_SERVICE_URL defaults to http://localhost:8000.
+
+uv sync
+```
+
+### Running
+
+Start QueryService first (see above), then in a second terminal:
+
+```bash
+# Pipe a code snippet — use --stream to watch the agent's reasoning steps
+echo 'var kernel = new Kernel();
+kernel.Plugins.Add(new MyPlugin());' | uv run main.py --stream
+```
+
+The agent will call `query_sk_docs` one or more times, each of which triggers
+a full RAG cycle in QueryService, then produce migration advice with citations.
+
+### Tests
+
+```bash
+uv run pytest -v
 ```
 
 ---

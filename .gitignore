@@ -8,6 +8,15 @@
 bin/
 obj/
 
+# Secrets and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*secret*
+*credentials*
+
 # Markdown docs (keep README.md)
 *.md
 !README.md
